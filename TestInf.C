@@ -7,6 +7,8 @@
 * are compared.
 */
 #include <string.h>
+#include <iostream>
+#include <fstream>
 #include <complex.h>
 // libMesh include files.
 #include "libmesh/getpot.h" // for input-argument parsing
@@ -15,6 +17,7 @@
 #include "libmesh/elem.h"
 #include "libmesh/mesh_generation.h"
 #include "libmesh/exodusII_io.h"
+#include "libmesh/vtk_io.h"
 #include "libmesh/eigen_system.h"
 #include "libmesh/equation_systems.h"
 #include "libmesh/fe.h"
@@ -42,8 +45,9 @@ using namespace libMesh;
 void assemble_SchroedingerEquation(libMesh::EquationSystems & , const std::string &);
 void get_dirichlet_dofs(EquationSystems &, const std::string & , std::set<unsigned int>&);
 void tetrahedralise_sphere(UnstructuredMesh& mesh, std::vector<Node> geometry, std::string creator, Real r, int NrBall, Real VolConst, Real L, unsigned int N);
-void  mesh_write(EquationSystems& equation_systems);
-void  solution_write(EquationSystems& equation_systems, unsigned int i);
+void mesh_write(EquationSystems& equation_systems);
+void solution_write(EquationSystems& equation_systems, unsigned int i, std::string filename);
+void cube_io(EquationSystems& es, std::vector<Node> geom, std::string output, std::string SysName);
 
 int main (int argc, char** argv){
    // Initialize libMesh and the dependent libraries.
@@ -94,25 +98,27 @@ int main (int argc, char** argv){
    // overwrite the meshes with a spherical grid with radius 1.7
    Real E = cl("Energy", 0.0);
    Real r=cl("radius", 20.);
-   //int NrBall=cl("points", 50);
-   //Real VolConst= cl("maxVol", 1./(32.*sqrt(E*E*E)) );
-   //Real L=cl("bending", 2.);
-   //int N=cl("circles", 5);
-   int maxiter=cl("maxiter", 700);
-   std::vector<Node> geometry(1);
-   geometry[0]=Point(0,0,0);
+   int NrBall=cl("points", 50);
+   Real VolConst= cl("maxVol", 1./(32.*sqrt(E*E*E)) );
+   Real L=cl("bending", 2.);
+   int N=cl("circles", 5);
+   unsigned int maxiter=cl("maxiter", 700);
+   std::vector<Node> geometry;
+   libMesh::Node tmpnd(0., 0., 0., 1);
+   geometry.push_back(tmpnd);
    std::string mesh_geom = cl("mesh_geom", "sphere");
-   //tetrahedralise_sphere(mesh, geometry, mesh_geom, r, NrBall, VolConst, L, N);
+  // tetrahedralise_sphere(mesh, geometry, mesh_geom, r, NrBall, VolConst, L, N);
+  // tetrahedralise_sphere(inf_mesh, geometry, mesh_geom, r, NrBall, VolConst, L, N);
  //   MeshTools::Generation::build_cube (mesh, 7, 7, 7,
  //                                         -r, r, -r, r,
  //                                         -r, r, HEX8);
  //   MeshTools::Generation::build_cube (inf_mesh, 7, 7, 7,
  //                                         -r, r, -r, r,
  //                                         -r, r, HEX8);
-    MeshTools::Generation::build_sphere (mesh, r, 3, HEX8,
-                                          2, true);
-    MeshTools::Generation::build_sphere (inf_mesh, r, 3, HEX8,
-                                          2, true);
+   MeshTools::Generation::build_sphere (mesh, r, 2, HEX8,
+                                         2, true);
+   MeshTools::Generation::build_sphere (inf_mesh, r, 2, HEX8,
+                                         2, true);
 
 
    //In case of infinite elements, they are added now by respective interface
@@ -176,9 +182,8 @@ int main (int argc, char** argv){
    finite_eq_sys.parameters.set<Real> ("linear solver tolerance") = pow(TOLERANCE, 5./3.);
    finite_eq_sys.parameters.set<unsigned int>("linear solver maximum iterations") = maxiter;
    infinite_eq_sys.parameters.set<Real> ("linear solver tolerance") = pow(TOLERANCE, 5./3.);
-   infinite_eq_sys.parameters.set<unsigned int>("linear solver maximum iterations") = maxiter;
+   infinite_eq_sys.parameters.set<unsigned int>("linear solver maximum iterations") = maxiter*2;
 
-   
    // Initialize the data structures for the equation system.
    finite_eq_sys.init();
    infinite_eq_sys.init();
@@ -200,31 +205,41 @@ int main (int argc, char** argv){
    out << "Number of converged eigenpairs: " << fnconv << "\n";
    out << "Number of converged eigenpairs: " << inconv << "\n" << std::endl;
 
-   #ifdef LIBMESH_HAVE_EXODUS_API
-       // Write the eigen vector to file and the eigenvalues to libMesh::out.
-       out<<"energy of state   (without infinite)      (with infinite)"<<std::endl;
-       for(unsigned int i=0; i<std::min(inconv,fnconv); i++){
-          std::pair<Real,Real> eigpair = finite_eig_sys.get_eigenpair(i);
-          out<<"                   ";
-          out<<eigpair.first+infinite_eq_sys.parameters.set<Number>("gsE");
-          std::ostringstream eigenvector_output_name;
-          eigenvector_output_name<< i <<".e" ;
+   // Write the eigen vector to file and the eigenvalues to libMesh::out.
+   out<<"energy of state   (without infinite)"<<std::endl;
+   for(unsigned int i=0; i<fnconv; i++){
+      std::pair<Real,Real> eigpair = finite_eig_sys.get_eigenpair(i);
+      out<<"                   ";
+      out<<eigpair.first+finite_eq_sys.parameters.set<Number>("gsE")<<std::endl;
+      std::ostringstream eigenvector_output_name;
+      eigenvector_output_name<< i <<".e" ;
+      #ifdef LIBMESH_HAVE_EXODUS_API
           ExodusII_IO (mesh).write_equation_systems ( eigenvector_output_name.str(), finite_eq_sys);
-
-          std::ostringstream ieigenvector_output_name;
-          eigpair = infinite_eig_sys.get_eigenpair(i);
-          out<<"        "<<eigpair.first+finite_eq_sys.parameters.set<Number>("gsE")<<std::endl;
-          ieigenvector_output_name<< i <<"_inf.e" ;
-          ExodusII_IO (inf_mesh).write_equation_systems (ieigenvector_output_name.str(), infinite_eq_sys);
-       }
-   #endif // #ifdef LIBMESH_HAVE_EXODUS_API
-   //infinite_eig_sys.get_eigenpair(0);
-   //mesh_write(finite_eq_sys);
-   //mesh_write(infinite_eq_sys);
-   for(unsigned int i=0; i<std::min(inconv,fnconv); i++){
-      out<<std::endl<<std::endl;
-      solution_write(infinite_eq_sys, i);
-      out<<std::endl<<std::endl;
+      #endif // #ifdef LIBMESH_HAVE_EXODUS_API
+      std::ostringstream fe_file;
+      fe_file<<"finite_"<<i<<".cube";
+      //cube_io(finite_eq_sys, geometry, fe_file.str());
+      cube_io(finite_eq_sys, geometry, fe_file.str(), "EigenSE");
+      //solution_write(finite_eq_sys, i, fe_file.str());
+      //eigenvector_output_name<< i <<".vtk" ;
+      //VTKIO(mesh).write_equation_systems ( eigenvector_output_name.str(), finite_eq_sys);
+   }
+   for(unsigned int i=0; i<inconv; i++){
+      std::pair<Real,Real> eigpair = infinite_eig_sys.get_eigenpair(i);
+      std::ostringstream eigenvector_output_name;
+      eigpair = infinite_eig_sys.get_eigenpair(i);
+      out<<"        "<<eigpair.first+infinite_eq_sys.parameters.set<Number>("gsE")<<std::endl;
+      eigenvector_output_name<< i <<"_inf.e" ;
+      #ifdef LIBMESH_HAVE_EXODUS_API
+         ExodusII_IO (inf_mesh).write_equation_systems (eigenvector_output_name.str(), infinite_eq_sys);
+      #endif // #ifdef LIBMESH_HAVE_EXODUS_API
+      std::ostringstream inf_file;
+      inf_file<<"infini_"<<i<<".cube";
+      //solution_write(infinite_eq_sys, i, inf_file.str());
+      //cube_io(infinite_eq_sys, geometry, inf_file.str());
+      cube_io(infinite_eq_sys, geometry, inf_file.str(), "EigenSE");
+      //eigenvector_output_name<< i <<"_inf.vtk";
+      //VTKIO(mesh).write_equation_systems ( eigenvector_output_name.str(), finite_eq_sys);
    }
 
    // All done.
@@ -338,10 +353,7 @@ void assemble_SchroedingerEquation(libMesh::EquationSystems & es, const std::str
    Number E=es.parameters.get<Number>("gsE");  
    //libMesh::Number k=omega; //divided by c which is 0 in atomic units.
    // -->ik = -i*k => for neg. energy: exp(-i*sqrt(2E)*mu(x))= exp(-sqrt(2|E|)*mu(x)) ==> expon. decay in function.
-   libMesh::Number ik=sqrt(co2*E)*(std::complex<double>)_Complex_I; // -->try this for now...
-   if (real(E)<0){ // E<0:
-     ik=sqrt(-co2*E); // this gives exponential decay .
-   }
+   libMesh::Number ik=sqrt(-co2*E); // -->try this for now...
    Number potval;  
    libMesh::Number temp; // -->try this for now...
       
@@ -527,7 +539,7 @@ void  mesh_write(EquationSystems& equation_systems){
    }
 }
 
-void  solution_write(EquationSystems& equation_systems, unsigned int i){
+void  solution_write(EquationSystems& equation_systems, unsigned int i, std::string filename){
    CondensedEigenSystem & system = equation_systems.get_system<CondensedEigenSystem> ("EigenSE");
    const MeshBase & mesh = equation_systems.get_mesh();
    const DofMap & dof_map = system.get_dof_map();
@@ -550,6 +562,10 @@ void  solution_write(EquationSystems& equation_systems, unsigned int i){
    // Tell the finite element object to use our quadrature rule.
    fe->attach_quadrature_rule (&qrule);
    inf_fe->attach_quadrature_rule (&qrule);
+
+
+   std::ofstream out(filename);
+   out<<std::endl<<std::endl;
    
    MeshBase::const_element_iterator           el = mesh.active_local_elements_begin();
    const MeshBase::const_element_iterator end_el = mesh.active_local_elements_end();
@@ -587,4 +603,5 @@ void  solution_write(EquationSystems& equation_systems, unsigned int i){
          out<<std::real(soln)<<"  "<<std::imag(soln)<<std::endl;
       }
    }
+   out<<std::endl<<std::endl;
 }
