@@ -148,10 +148,10 @@ int main (int argc, char** argv){
    int N=cl("circles", 5);
    unsigned int maxiter=cl("maxiter", 700);
 
-   MeshTools::Generation::build_sphere (mesh, r, 2, HEX8,
-                                         2, true);
-   MeshTools::Generation::build_sphere (inf_mesh, r, 2, HEX8,
-                                         2, true);
+   MeshTools::Generation::build_sphere (mesh, r, 3, HEX8,
+                                         3, true);
+   MeshTools::Generation::build_sphere (inf_mesh, r, 3, HEX8,
+                                         3, true);
 
 
    //In case of infinite elements, they are added now by respective interface
@@ -190,8 +190,8 @@ int main (int argc, char** argv){
    finite_eig_sys.eigen_solver->set_eigensolver_type(KRYLOVSCHUR); // this is default
    infinite_eig_sys.eigen_solver->set_eigensolver_type(KRYLOVSCHUR);
 
-   finite_eig_sys.eigen_solver->set_position_of_spectrum( 2.0);
-   infinite_eig_sys.eigen_solver->set_position_of_spectrum(2.0);
+   finite_eig_sys.eigen_solver->set_position_of_spectrum( 0.0);
+   infinite_eig_sys.eigen_solver->set_position_of_spectrum(0.0);
    
    SlepcEigenSolver<Number>* fin_solver = 
                  libmesh_cast_ptr<SlepcEigenSolver<Number>* >( &(*finite_eig_sys.eigen_solver) );
@@ -210,6 +210,7 @@ int main (int argc, char** argv){
    inf_solver ->set_solver_configuration(IConfigSolver);
 
    finite_eq_sys.parameters.set<Real>("radius")    = r;
+   infinite_eq_sys.parameters.set<Real>("radius")    = r;
    //set number of eigen values ( \p nev) and number of 
    // basis vectors \p ncv for the solution.
    //Note that ncv >= nev must hold and ncv >= 2*nev is recommended.
@@ -608,23 +609,24 @@ void cube_io(EquationSystems& es, std::string output, std::string SysName){
    std::ofstream im_out(re_output.str());
    std::ofstream re_out(im_output.str());
    std::ofstream abs_out(abs_output.str());
-   //re_out<<SysName<<std::endl<<std::endl; // print first two lines: comments
-   //im_out<<SysName<<std::endl<<std::endl; 
-   //abs_out<<SysName<<std::endl<<std::endl;
 
    PointLocatorTree pt_lctr(mesh);
    unsigned int num_line=0;
-   int N = 100;
+   Real N = 100.;
    Point q_point;
    for (int pts=1;pts<=4*N;pts++) {
-      if (pts%4==0)
-         Point q_point(pts*N/(4.*r), 0., 0.);
-      else if (pts%4==1)
-         Point q_point(-pts*N/(4.*r), 0., 0.);
-      else if (pts%4==2)
-         Point q_point(-r*4./(pts*N), 0., 0.);
-      else 
-         Point q_point( r*4./(pts*N), 0., 0.);
+      if (pts%4==0){
+         q_point = Point(  pts*r/(4.*N), 0., 0.);
+         }
+      else if (pts%4==1){
+         q_point = Point( -pts*r/(4.*N), 0., 0.);
+         }
+      else if (pts%4==2){
+         q_point = Point ( -N*4./(pts*r), 0., 0.);
+         }
+      else {
+         q_point = Point (  N*4./(pts*r), 0., 0.);
+         }
       num_line++;
       
       const Elem * elem=pt_lctr(q_point);
@@ -652,9 +654,12 @@ void cube_io(EquationSystems& es, std::string output, std::string SysName){
          for (unsigned int i=0; i<n_sf; i++){
             soln+=(*solution_vect)(dof_indices[i])*data.shape[i];
          }
-         re_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::real(soln);
-         im_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::imag(soln);
-         abs_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::abs(soln);
+         re_out<<" "<<std::setw(12)<<q_point(0);
+         im_out<<" "<<std::setw(12)<<q_point(0);
+         abs_out<<" "<<std::setw(12)<<q_point(0);
+         re_out<<"  "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::real(soln)<<std::endl;
+         im_out<<"  "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::imag(soln)<<std::endl;
+         abs_out<<"  "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::abs(soln)<<std::endl;
 
       }
    }

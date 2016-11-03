@@ -3,11 +3,11 @@
 nev = 5        # any integer
 pot = FooBar   # a string used later for the name of output-files
 spect =sm      #  sm, lm, (magnitude) sr, lr, (real) si, li, (imaginary) 
-Energy =1.5    # set the energy-offset ( target energy: Energy= ... and spect = sm, sr or similar)
+Energy = 2.0    # set the energy-offset ( target energy: Energy= ... and spect = sm, sr or similar)
 
 mesh_geom=fibonacci  # sphere, box, own, fibonacci, spiral, archimedes
 order=1
-radius= 12.
+radius= 3.
 points= 40
 maxVol= 10.
 bending= 100.
