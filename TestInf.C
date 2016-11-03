@@ -38,16 +38,60 @@
 #include "libmesh/fe_compute_data.h"
 #include "libmesh/error_vector.h" 
 
+// for finding element for point
+#include "libmesh/point_locator_tree.h"
+
+// for the SlepcSolverConfiguration
+#include "libmesh/solver_configuration.h"
+#include "libmesh/slepc_eigen_solver.h"
+
+
+EXTERN_C_FOR_SLEPC_BEGIN
+# include <slepceps.h>
+EXTERN_C_FOR_SLEPC_END
+
+/**
+ * Defines an \p enum for spectral tronsformations
+ * applied before solving the (generalised) eigenproblem
+ */
+enum SpectralTransform {SHIFT=0,
+                        SINVERT,
+                        CAYLEY,
+
+                        INVALID_ST
+};
+
+class SlepcSolverConfiguration : public libMesh::SolverConfiguration
+{
+public:
+
+   SlepcSolverConfiguration( libMesh::SlepcEigenSolver<libMesh::Number> & slepc_eigen_solver):
+        _slepc_solver(slepc_eigen_solver),
+        _st(INVALID_ST)
+   {}
+   
+   ~SlepcSolverConfiguration() {}
+
+   virtual void configure_solver() override;
+
+   void SetST(SpectralTransform st)
+   { _st=st;}
+   
+private:
+   // The linear solver object that we are configuring
+   libMesh::SlepcEigenSolver<libMesh::Number>& _slepc_solver;
+   SpectralTransform _st;
+   //ST st;
+
+};
+
 // Bring in everything from the libMesh namespace
 using namespace libMesh;
 
 //prototypes of functions needed to set-up the system:
 void assemble_SchroedingerEquation(libMesh::EquationSystems & , const std::string &);
 void get_dirichlet_dofs(EquationSystems &, const std::string & , std::set<unsigned int>&);
-void tetrahedralise_sphere(UnstructuredMesh& mesh, std::vector<Node> geometry, std::string creator, Real r, int NrBall, Real VolConst, Real L, unsigned int N);
-void mesh_write(EquationSystems& equation_systems);
-void solution_write(EquationSystems& equation_systems, unsigned int i, std::string filename);
-void cube_io(EquationSystems& es, std::vector<Node> geom, std::string output, std::string SysName);
+void cube_io(EquationSystems& es, std::string output, std::string SysName);
 
 int main (int argc, char** argv){
    // Initialize libMesh and the dependent libraries.
@@ -103,18 +147,7 @@ int main (int argc, char** argv){
    Real L=cl("bending", 2.);
    int N=cl("circles", 5);
    unsigned int maxiter=cl("maxiter", 700);
-   std::vector<Node> geometry;
-   libMesh::Node tmpnd(0., 0., 0., 1);
-   geometry.push_back(tmpnd);
-   std::string mesh_geom = cl("mesh_geom", "sphere");
-  // tetrahedralise_sphere(mesh, geometry, mesh_geom, r, NrBall, VolConst, L, N);
-  // tetrahedralise_sphere(inf_mesh, geometry, mesh_geom, r, NrBall, VolConst, L, N);
- //   MeshTools::Generation::build_cube (mesh, 7, 7, 7,
- //                                         -r, r, -r, r,
- //                                         -r, r, HEX8);
- //   MeshTools::Generation::build_cube (inf_mesh, 7, 7, 7,
- //                                         -r, r, -r, r,
- //                                         -r, r, HEX8);
+
    MeshTools::Generation::build_sphere (mesh, r, 2, HEX8,
                                          2, true);
    MeshTools::Generation::build_sphere (inf_mesh, r, 2, HEX8,
@@ -156,11 +189,27 @@ int main (int argc, char** argv){
    // set numerical parameters for SLEPC on how to solve the system.
    finite_eig_sys.eigen_solver->set_eigensolver_type(KRYLOVSCHUR); // this is default
    infinite_eig_sys.eigen_solver->set_eigensolver_type(KRYLOVSCHUR);
-   //finite_eig_sys.eigen_solver->set_position_of_spectrum(SMALLEST_REAL);
-   //infinite_eig_sys.eigen_solver->set_position_of_spectrum(SMALLEST_REAL);
-   finite_eig_sys.eigen_solver->set_position_of_spectrum(SMALLEST_MAGNITUDE);
-   infinite_eig_sys.eigen_solver->set_position_of_spectrum(SMALLEST_MAGNITUDE);
 
+   finite_eig_sys.eigen_solver->set_position_of_spectrum( 2.0);
+   infinite_eig_sys.eigen_solver->set_position_of_spectrum(2.0);
+   
+   SlepcEigenSolver<Number>* fin_solver = 
+                 libmesh_cast_ptr<SlepcEigenSolver<Number>* >( &(*finite_eig_sys.eigen_solver) );
+   SlepcEigenSolver<Number>* inf_solver = 
+                 libmesh_cast_ptr<SlepcEigenSolver<Number>* >( &(*infinite_eig_sys.eigen_solver) );
+
+   SlepcSolverConfiguration FConfigSolver( *fin_solver);
+   SlepcSolverConfiguration IConfigSolver( *inf_solver);
+
+   // set the spectral transformation:
+   IConfigSolver.SetST(SINVERT);
+   FConfigSolver.SetST(SINVERT);
+   //ConfigSolver.SetST(CAYLEY);
+   //ConfigSolver.SetST(SHIFT); // this is default
+   fin_solver ->set_solver_configuration(FConfigSolver);
+   inf_solver ->set_solver_configuration(IConfigSolver);
+
+   finite_eq_sys.parameters.set<Real>("radius")    = r;
    //set number of eigen values ( \p nev) and number of 
    // basis vectors \p ncv for the solution.
    //Note that ncv >= nev must hold and ncv >= 2*nev is recommended.
@@ -218,9 +267,6 @@ int main (int argc, char** argv){
       #endif // #ifdef LIBMESH_HAVE_EXODUS_API
       std::ostringstream fe_file;
       fe_file<<"finite_"<<i<<".cube";
-      //cube_io(finite_eq_sys, geometry, fe_file.str());
-      cube_io(finite_eq_sys, geometry, fe_file.str(), "EigenSE");
-      //solution_write(finite_eq_sys, i, fe_file.str());
       //eigenvector_output_name<< i <<".vtk" ;
       //VTKIO(mesh).write_equation_systems ( eigenvector_output_name.str(), finite_eq_sys);
    }
@@ -235,9 +281,7 @@ int main (int argc, char** argv){
       #endif // #ifdef LIBMESH_HAVE_EXODUS_API
       std::ostringstream inf_file;
       inf_file<<"infini_"<<i<<".cube";
-      //solution_write(infinite_eq_sys, i, inf_file.str());
-      //cube_io(infinite_eq_sys, geometry, inf_file.str());
-      cube_io(infinite_eq_sys, geometry, inf_file.str(), "EigenSE");
+      cube_io(infinite_eq_sys, inf_file.str(), "EigenSE");
       //eigenvector_output_name<< i <<"_inf.vtk";
       //VTKIO(mesh).write_equation_systems ( eigenvector_output_name.str(), finite_eq_sys);
    }
@@ -354,6 +398,11 @@ void assemble_SchroedingerEquation(libMesh::EquationSystems & es, const std::str
    //libMesh::Number k=omega; //divided by c which is 0 in atomic units.
    // -->ik = -i*k => for neg. energy: exp(-i*sqrt(2E)*mu(x))= exp(-sqrt(2|E|)*mu(x)) ==> expon. decay in function.
    libMesh::Number ik=sqrt(-co2*E); // -->try this for now...
+   // set parameters for infinite elements:
+   es.parameters.set<Real>("speed")=1.;
+   // --> it would be better if 'current frequency' could be <Number>, not <Real>.
+   es.parameters.set<Real>("current frequency")=abs(sqrt(co2*E));
+
    Number potval;  
    libMesh::Number temp; // -->try this for now...
       
@@ -481,77 +530,63 @@ void assemble_SchroedingerEquation(libMesh::EquationSystems & es, const std::str
    return;
 }
 
-void  mesh_write(EquationSystems& equation_systems){
-   CondensedEigenSystem & system = equation_systems.get_system<CondensedEigenSystem> ("EigenSE");
-   const MeshBase & mesh = equation_systems.get_mesh();
-   const DofMap & dof_map = system.get_dof_map();
+void SlepcSolverConfiguration::configure_solver()
+{
+   PetscErrorCode ierr = 0;
 
-   UniquePtr<NumericVector<Number> > solution_vect = 
-        NumericVector<Number>::build(equation_systems.comm());
-   solution_vect->init((*system.solution).size(), true, SERIAL);
-   (*system.solution).localize(* solution_vect);
-   
-   const FEType & fe_type = dof_map.variable_type(0);
-   UniquePtr<FEBase> fe (FEBase::build(3, fe_type));
-   UniquePtr<FEBase> inf_fe (FEBase::build_InfFE(3, fe_type));
-   FEBase * cfe = libmesh_nullptr;
-   QGauss qrule (3, SECOND);
-   std::vector<dof_id_type> dof_indices;
-   // Tell the finite element object to use our quadrature rule.
-   fe->attach_quadrature_rule (&qrule);
-   inf_fe->attach_quadrature_rule (&qrule);
-   
-   MeshBase::const_element_iterator           el = mesh.active_local_elements_begin();
-   const MeshBase::const_element_iterator end_el = mesh.active_local_elements_end();
-   for ( ; el != end_el; ++el){
-      const Elem * elem = *el;
+   // if a spectral transformation was requested
+   if (_st!=INVALID_ST){
+    
+      // initialise the st with the default values
+      //(than, change only the spectral transformation value).
+      ST st;
+      ierr = EPSGetST(_slepc_solver.eps(), &st);
+      libmesh_assert(ierr == 0);
+      //STCreate(_slepc_solver.comm().get(), &st);
 
-      dof_map.dof_indices (elem, dof_indices);
-      if (elem->infinite())
-         cfe = inf_fe.get();
-      else
-          cfe = fe.get();
-      const std::vector<Point>& q_point = cfe->get_xyz();
-      cfe->reinit(elem);
-      unsigned int max_qp = cfe->n_quadrature_points();
-      for (unsigned int qp=0; qp<max_qp; qp++){
-         //out<<elem->infinite()<<" ";
+      // Set it to the desired type of spectral transformation.
+      // The value of the respective shift is chosen to be the target
+      // specified via \p set_position_of_spectrum().
+      switch (_st)
+         {
+         case SHIFT:
+            ierr = STSetType(st, STSHIFT);
+            break;
+         case SINVERT:
+            ierr = STSetType(st, STSINVERT);
+            break;
+         case CAYLEY:
+      #if SLEPC_VERSION_LESS_THAN(2,2,1)
+            libmesh_error_msg("SLEPc 2.2.1 is required to call CAYLEY transform.");
+            break;
+      #else
+            ierr = STSetType(st, STCAYLEY);
+            break;
+      #endif
+         default:
+            // print a warning but do nothing more.
+            break;
+         }  //tell the \p EPS object which \p ST to use
+      // this is not needed because it is called in the
+      // in the \p EPSSetUP() anyway.
+      //ierr = EPSSetST(_slepc_solver.eps(), st);
 
-         //print q_point;
-         out<<q_point[qp](0)<<"  ";
-         out<<q_point[qp](1)<<"  ";
-         out<<q_point[qp](2)<<"     ";
-         Number soln=0;
-
-         Point map_point=FEInterface::inverse_map(3, fe_type, elem, q_point[qp], TOLERANCE, true); 
-         FEComputeData data(equation_systems, map_point); 
-         FEInterface::compute_data(3, fe_type, elem, data);
-         const unsigned int n_sf = cfe->n_shape_functions();
-
-         //print solution value at that point.
-         for (unsigned int i=0; i<n_sf; i++){
-            soln+=(*solution_vect)(dof_indices[i])*data.shape[i]; // hoping the order is same in shape and dof_indices.
-            //out<<std::endl<<"    "<<(*solution_vect)(dof_indices[i]);
-            //out<<"    "<<data.shape[i]<<std::endl;
-         }
-         out<<std::real(soln)<<"  "<<std::imag(soln)<<std::endl;
-      }
+      libmesh_assert(ierr == 0);
    }
 }
 
-void  solution_write(EquationSystems& equation_systems, unsigned int i, std::string filename){
-   CondensedEigenSystem & system = equation_systems.get_system<CondensedEigenSystem> ("EigenSE");
-   const MeshBase & mesh = equation_systems.get_mesh();
+void cube_io(EquationSystems& es, std::string output, std::string SysName){
+   //CondensedEigenSystem & system = es.get_system<CondensedEigenSystem> ("EigenSE"); // --> how to generalise??
+   System & system = es.get_system<System> (SysName); 
+   const MeshBase & mesh = es.get_mesh();
    const DofMap & dof_map = system.get_dof_map();
-
-   // copy the i-th solution vector to system.solution.
-   system.get_eigenpair(i);
-
+   
    UniquePtr<NumericVector<Number> > solution_vect = 
-        NumericVector<Number>::build(equation_systems.comm());
+        NumericVector<Number>::build(es.comm());
 
    solution_vect->init((*system.solution).size(), true, SERIAL);
    (*system.solution).localize(* solution_vect);
+   Real r = es.parameters.get<Real>("radius");
    
    const FEType & fe_type = dof_map.variable_type(0);
    UniquePtr<FEBase> fe (FEBase::build(3, fe_type));
@@ -563,45 +598,64 @@ void  solution_write(EquationSystems& equation_systems, unsigned int i, std::str
    fe->attach_quadrature_rule (&qrule);
    inf_fe->attach_quadrature_rule (&qrule);
 
+   // set output to filename
+   std::ostringstream re_output;
+   re_output<<"re_"<<output;
+   std::ostringstream im_output;
+   im_output<<"im_"<<output;
+   std::ostringstream abs_output;
+   abs_output<<"abs_"<<output;
+   std::ofstream im_out(re_output.str());
+   std::ofstream re_out(im_output.str());
+   std::ofstream abs_out(abs_output.str());
+   //re_out<<SysName<<std::endl<<std::endl; // print first two lines: comments
+   //im_out<<SysName<<std::endl<<std::endl; 
+   //abs_out<<SysName<<std::endl<<std::endl;
 
-   std::ofstream out(filename);
-   out<<std::endl<<std::endl;
-   
-   MeshBase::const_element_iterator           el = mesh.active_local_elements_begin();
-   const MeshBase::const_element_iterator end_el = mesh.active_local_elements_end();
-   for ( ; el != end_el; ++el){
-      const Elem * elem = *el;
+   PointLocatorTree pt_lctr(mesh);
+   unsigned int num_line=0;
+   int N = 100;
+   Point q_point;
+   for (int pts=1;pts<=4*N;pts++) {
+      if (pts%4==0)
+         Point q_point(pts*N/(4.*r), 0., 0.);
+      else if (pts%4==1)
+         Point q_point(-pts*N/(4.*r), 0., 0.);
+      else if (pts%4==2)
+         Point q_point(-r*4./(pts*N), 0., 0.);
+      else 
+         Point q_point( r*4./(pts*N), 0., 0.);
+      num_line++;
+      
+      const Elem * elem=pt_lctr(q_point);
+      if(elem==NULL){
+         abs_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<0.0;
+         im_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<0.0;
+         re_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<0.0;
+      }
+      else{
 
-      dof_map.dof_indices (elem, dof_indices);
-      if (elem->infinite())
-          cfe = inf_fe.get();
-      else
-          cfe = fe.get();
-      const std::vector<Point>& q_point = cfe->get_xyz();
-      cfe->reinit(elem);
-      unsigned int max_qp = cfe->n_quadrature_points();
-      for (unsigned int qp=0; qp<max_qp; qp++){
-         //out<<elem->infinite()<<" ";
-
-         //print q_point;
-         out<<q_point[qp](0)<<"  ";
-         out<<q_point[qp](1)<<"  ";
-         out<<q_point[qp](2)<<"     ";
-         Number soln=0;
-
-         Point map_point=FEInterface::inverse_map(3, fe_type, elem, q_point[qp], TOLERANCE, true); 
-         FEComputeData data(equation_systems, map_point); 
+         dof_map.dof_indices (elem, dof_indices);
+  
+         Point map_point=FEInterface::inverse_map(3, fe_type, elem, q_point, TOLERANCE, true); 
+         FEComputeData data(es, map_point); 
          FEInterface::compute_data(3, fe_type, elem, data);
-         const unsigned int n_sf = cfe->n_shape_functions();
-
-         //print solution value at that point.
+      
+         //compute solution value at that point.
+         Number soln=0;
+         if (elem->infinite())
+            cfe = inf_fe.get();
+         else
+            cfe = fe.get();
+         cfe->reinit(elem);
+         unsigned int n_sf= cfe->n_shape_functions();
          for (unsigned int i=0; i<n_sf; i++){
-            soln+=(*solution_vect)(dof_indices[i])*data.shape[i]; // hoping the order is same in shape and dof_indices.
-            //out<<std::endl<<"    "<<(*solution_vect)(dof_indices[i]);
-            //out<<"    "<<data.shape[i]<<std::endl;
+            soln+=(*solution_vect)(dof_indices[i])*data.shape[i];
          }
-         out<<std::real(soln)<<"  "<<std::imag(soln)<<std::endl;
+         re_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::real(soln);
+         im_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::imag(soln);
+         abs_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::abs(soln);
+
       }
    }
-   out<<std::endl<<std::endl;
 }
