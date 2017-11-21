@@ -91,6 +91,7 @@ using namespace libMesh;
 //prototypes of functions needed to set-up the system:
 void assemble_SchroedingerEquation(libMesh::EquationSystems & , const std::string &);
 void line_print(EquationSystems& es, std::string output, std::string SysName);
+void grid_io(EquationSystems& es, std::string output, std::string SysName);
 
 int main (int argc, char** argv){
    // Initialize libMesh and the dependent libraries.
@@ -138,18 +139,21 @@ int main (int argc, char** argv){
    Mesh mesh(init.comm(), dim);
    
    // overwrite the meshes with a spherical grid with radius 1.7
-   Real E = cl("Energy", 0.1);
-   Real r=cl("radius", 2.);
+   Real E = cl("Energy", 50);
+   Real r=cl("radius", 0.7);
    unsigned int maxiter=cl("maxiter", 700);
 
-   //MeshTools::Generation::build_sphere (mesh, r, 3, HEX27, 3, true);
-   //MeshTools::Generation::build_sphere (mesh, r, 1, HEX8, 1, true);
-   MeshTools::Generation::build_sphere (mesh, r, 2, HEX8, 2, true);
+   MeshTools::Generation::build_cube (mesh, 6, 35,36,
+                                           -0.5, 0.5,
+                                           -4.5, 4.4,
+                                           -4.5, 4.6,HEX8, false);
+                                      //     -4.5, 4.5,HEX8, false);
 
+   //TODO: the following two options should be the same with all_second_order() but aren't
    //FEType fe_type(SECOND, LAGRANGE, FIFTH, JACOBI_20_00, CARTESIAN);
    FEType fe_type(FIRST, LAGRANGE, FIFTH, JACOBI_20_00, CARTESIAN);
-   //In case of infinite elements, they are added now by respective interface
 
+   //In case of infinite elements, they are added now by respective interface
    InfElemBuilder builder(mesh);
    builder.build_inf_elem(true);
    
@@ -229,16 +233,21 @@ int main (int argc, char** argv){
    out << "Number of converged eigenpairs: " << nconv << "\n";
 
    // Write the eigen vector to file and the eigenvalues to libMesh::out.
+   std::ostringstream eigenvector_output_name;
    for(unsigned int i=0; i<nconv; i++){
       std::pair<Real,Real> eigpair = eig_sys.get_eigenpair(i);
       eigpair = eig_sys.get_eigenpair(i);
       out<<"        "<<eigpair.first<<std::endl;
       eq_sys.parameters.set<Real>("current frequency")=eq_sys.parameters.get<Real>("speed")*sqrt(std::abs(eigpair.first)*2.)/(2*pi);
+      eq_sys.parameters.set<Number>("momentum")=sqrt((Number)(eigpair.first)*2.);
+      eigenvector_output_name<<"U"<<"-"<<cl("pot","unknwn")<<"_inf.e" ;
+      ExodusII_IO (mesh).write_equation_systems(eigenvector_output_name.str(), eq_sys);
       
       std::ostringstream file;
       file<<"infini_"<<i<<".txt";
       // print the solution along the x-coordinate
       line_print(eq_sys, file.str(), "EigenSE");
+      grid_io(eq_sys, file.str(), "EigenSE");
    }
 
    // All done.
@@ -377,8 +386,8 @@ void assemble_SchroedingerEquation(libMesh::EquationSystems & es, const std::str
          // Now, get number of shape functions that are nonzero at this point::
          unsigned int n_sf = cfe->n_shape_functions();
          // loop over them:
-         if (q_point[qp].size()<1.)
-            potval=-0.5;
+         if (std::abs(q_point[qp](0))<0.2)
+            potval=-50;
          else
             potval=0.0; // is assumed to be close enough to infinity
          for (unsigned int i=0; i<n_sf; i++){
@@ -473,7 +482,9 @@ void line_print(EquationSystems& es, std::string output, std::string SysName){
         NumericVector<Number>::build(es.comm());
 
    solution_vect->init((*system.solution).size(), true, SERIAL);
+   // this is only important for parallelisation, I guess?
    (*system.solution).localize(* solution_vect);
+   solution_vect=system.solution->clone();
    Real r = es.parameters.get<Real>("radius");
    
    const FEType & fe_type = dof_map.variable_type(0);
@@ -499,22 +510,28 @@ void line_print(EquationSystems& es, std::string output, std::string SysName){
 
    PointLocatorTree pt_lctr(mesh);
    unsigned int num_line=0;
-   Real N = 100.;
+   Real N = 50.;
    Point q_point;
-   const Real start=-2*r;
+   //#const Real start=-r;
    for (int pts=1;pts<=2*N;pts++) {
-      // go from -2*r to 2*r.
-      q_point = Point( start+ pts*r/N*2, 0., 0.);
+      // go from -2*r to 2*r
+      if (pts<N)
+         q_point = Point( pts*r/N, 0., 0.);
+      else
+         q_point = Point(r-pts*r/N, 0., 0.);
+      //#q_point = Point( start+ pts*r/N, 0., 0.);
       num_line++;
       
       const Elem * elem=pt_lctr(q_point);
       if(elem==NULL){
-         re_out<<" "<<std::setw(12)<<q_point(0);
-         im_out<<" "<<std::setw(12)<<q_point(0);
-         abs_out<<" "<<std::setw(12)<<q_point(0);
-         abs_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<0.0<<std::endl;
-         im_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<0.0<<std::endl;
-         re_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<0.0<<std::endl;
+        
+         num_line++; // this doesn't do anything anyway.
+         //re_out<<" "<<std::setw(12)<<q_point(0);
+         //im_out<<" "<<std::setw(12)<<q_point(0);
+         //abs_out<<" "<<std::setw(12)<<q_point(0);
+         //abs_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<0.0<<std::endl;
+         //im_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<0.0<<std::endl;
+         //re_out<<" "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<0.0<<std::endl;
       }
       else{
 
@@ -530,6 +547,7 @@ void line_print(EquationSystems& es, std::string output, std::string SysName){
             cfe = inf_fe.get();
          else
             cfe = fe.get();
+         //cfe->reinit(elem, q_point);
          cfe->reinit(elem);
          unsigned int n_sf= cfe->n_shape_functions();
          for (unsigned int i=0; i<n_sf; i++){
@@ -542,6 +560,113 @@ void line_print(EquationSystems& es, std::string output, std::string SysName){
          im_out<<"  "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::imag(soln)<<std::endl;
          abs_out<<"  "<<std::setw(12)<<std::scientific<<std::setprecision(6)<<std::abs(soln)<<std::endl;
 
+      }
+   }
+}
+
+void grid_io(EquationSystems& es, std::string output, std::string SysName){
+   //CondensedEigenSystem & system = es.get_system<CondensedEigenSystem> ("EigenSE"); // --> how to generalise??
+   System & system = es.get_system<System> (SysName); 
+   const MeshBase & mesh = es.get_mesh();
+   const DofMap & dof_map = system.get_dof_map();
+   
+   UniquePtr<NumericVector<Number> > solution_vect = 
+        NumericVector<Number>::build(es.comm());
+
+   solution_vect->init((*system.solution).size(), true, SERIAL);
+   (*system.solution).localize(* solution_vect);
+   
+   const FEType & fe_type = dof_map.variable_type(0);
+   UniquePtr<FEBase> fe    (FEBase::build(3, fe_type));
+   UniquePtr<FEBase> inf_fe(FEBase::build_InfFE(3, fe_type));
+   FEBase * cfe = libmesh_nullptr;
+   QGauss qrule (3, fe_type.default_quadrature_order());
+   std::vector<dof_id_type> dof_indices;
+   // Tell the finite element object to use our quadrature rule.
+   fe->attach_quadrature_rule (&qrule);
+   inf_fe->attach_quadrature_rule (&qrule);
+
+   // set output to filename
+   std::ostringstream re_output;
+   re_output<<output;
+   std::ofstream re_out(re_output.str());
+   re_out<<SysName<<std::endl<<std::endl; // print first two lines: comments
+
+   Real r=0;
+   r = 1.99*es.parameters.get<Real>("radius");
+   Real lambda = es.parameters.get<Real>("speed")/es.parameters.get<Real>("current frequency");
+   //Real lambda = 6.28/es.parameters.get<Real>("momentum");
+   out<<"wavelength:  "<<lambda<<std::endl;
+
+   Real dx=std::min(lambda/6.,r/31.);
+   Real dy=std::min(lambda/6.,r/31.);
+   Real dz=std::min(lambda/6.,r/31.);
+   //Real dx=std::min(lambda/6.,0.3);
+   //Real dy=std::min(lambda/6.,0.3);
+   //Real dz=std::min(lambda/6.,0.3);
+   unsigned int nx=(2*r)/dx;
+   //unsigned int ny=(2*r+(max(1)-min(1)))/dy;
+   //unsigned int nz=(2*r+(max(2)-min(2)))/dz;
+   unsigned int ny=1;
+   unsigned int nz=1;
+
+   //Point start(-dx*nx/2.+0.001, -dy*ny/2.+0.001, -dz*nz/2.+0.001);
+   Point start(-dx*nx/2., 0., 0.);
+
+   unsigned int ix, iy, iz;
+   PointLocatorTree pt_lctr(mesh);
+   //pt_lctr.enable_out_of_mesh_mode();
+   for (ix=0;ix<nx;ix++) {
+      for (iy=0;iy<ny;iy++) {
+         for (iz=0;iz<nz;iz++) {
+
+            Point q_point(start(0)+(Real)ix*dx,
+                          start(1)+(Real)iy*dy,
+                          start(2)+(Real)iz*dz);
+
+            const Elem * elem=pt_lctr(q_point);
+            if(elem!=NULL){
+               dof_map.dof_indices (elem, dof_indices);
+   
+               Point map_point=FEInterface::inverse_map(3, fe_type, elem, q_point, TOLERANCE, true); 
+               FEComputeData data(es, map_point); 
+               FEInterface::compute_data(3, fe_type, elem, data);
+            
+               //compute solution value at that point.
+               Number soln=0;
+               if (elem->infinite())
+                  cfe = inf_fe.get();
+               else
+                  cfe = fe.get();
+	       //const std::vector<Point>& point = cfe->get_xyz();
+               cfe->reinit(elem);
+
+               unsigned int n_sf= cfe->n_shape_functions();
+               for (unsigned int i=0; i<n_sf; i++){
+                   //I need to model the damping function myself since the sobolev-weight is available only
+                   //at quadrature points...
+                  if(elem->infinite()){
+                     Point origin=elem->origin();
+                     Real v=map_point(2);
+
+                     UniquePtr<const Elem> base_el (elem->build_side_ptr(0));
+
+                     soln+=(*solution_vect)(dof_indices[i])*data.shape[i]*(1.-v)/2.;
+                  }
+                  else
+                     soln+=(*solution_vect)(dof_indices[i])*data.shape[i]; // hoping the order is same in shape and dof_indices.
+               }
+
+               re_out<<" "<<q_point(0);
+               re_out<<" "<<q_point(1);
+               re_out<<" "<<q_point(2);
+               re_out<<" "<<std::scientific<<std::setprecision(6)<<std::real(soln);
+               re_out<<" "<<std::scientific<<std::setprecision(6)<<std::imag(soln);
+               re_out<<" "<<std::scientific<<std::setprecision(6)<<std::abs(soln);
+            }
+
+            re_out<<std::endl;
+         }
       }
    }
 }

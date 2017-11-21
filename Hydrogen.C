@@ -160,7 +160,7 @@ libmesh_example_requires(false, "--enable-ifem");
 #endif
 
 #ifndef LIBMESH_USE_COMPLEX_NUMBERS 
-  libmesh_example_requires(false, "--enable-complex");
+libmesh_example_requires(false, "--enable-complex");
 #endif
 
 #ifdef LIBMESH_DEFAULT_SINGLE_PRECISION
@@ -231,9 +231,9 @@ FEType fe_type(SECOND, LAGRANGE, FIFTH, JACOBI_20_00, CARTESIAN);
 // Name the variable of interest 'phi' and approximate it as \p fe_type.
 eig_sys.add_variable("phi", fe_type);
 
- // assign the ground state energy. For infinite elements, the quality of this guess is crucial
- // otherwise the long-range limit will be wrong. If the 'current frequency' is too much off,
- // the solution will have no physical meaning at all.
+// assign the ground state energy. For infinite elements, the quality of this guess is crucial
+// otherwise the long-range limit will be wrong. If the 'current frequency' is too much off,
+// the solution will have no physical meaning at all.
 eq_sys.parameters.set<Number>("gsE")=E;
 
 //save the mesh-size in a parameter to scale the region for printing the solution later accordingly.
@@ -262,7 +262,7 @@ eig_sys.eigen_solver->set_position_of_spectrum(E);
 //fetch the solver-object used internally to be able to manipulate it using the self-written class
 // to set the transformation
 SlepcEigenSolver<Number>* solver = 
-                          libmesh_cast_ptr<SlepcEigenSolver<Number>* >( &(*eig_sys.eigen_solver) );
+                   libmesh_cast_ptr<SlepcEigenSolver<Number>* >( &(*eig_sys.eigen_solver) );
 
 // setup of our class @SlepcSolverConfiguration
 SlepcSolverConfiguration ConfigSolver( *solver);
@@ -340,13 +340,13 @@ return 0;
 #endif // LIBMESH_HAVE_SLEPC
 }
 
-  // TODO: how should the comment formating be done?
-  /**
-   * In this function, we assemble the actual system matrices. The inital equation is the eigen system \f$ H \Psi = \epsilon
-   * \Psi \f$
-   * where H is the Hamilton operator and Psi the eigen vector with corresponding eigen value \f$\epsilon\f$. 
-   * In the FEM-scheme, this becomes the generalised eigen problem  \f$ H \Psi = \epsilon M \Psi \f$ where M is the element mass matrix.
-   */
+// TODO: how should the comment formating be done?
+/**
+ * In this function, we assemble the actual system matrices. The inital equation is the eigen system \f$ H \Psi = \epsilon
+ * \Psi \f$
+ * where H is the Hamilton operator and Psi the eigen vector with corresponding eigen value \f$\epsilon\f$. 
+ * In the FEM-scheme, this becomes the generalised eigen problem  \f$ H \Psi = \epsilon M \Psi \f$ where M is the element mass matrix.
+ */
 void assemble_SchroedingerEquation(libMesh::EquationSystems & es, const std::string & system_name)
 {
   // It is a good idea to make sure we are assembling
@@ -495,7 +495,7 @@ void assemble_SchroedingerEquation(libMesh::EquationSystems & es, const std::str
           // For finite elements, dweight==0 and dphase==0, thus  
           // temp=dphi[i][qp]*dphi[j][qp].
           temp = (dweight[qp]*phi[i][qp]+weight[qp]*(dphi[i][qp]-ik*dphase[qp]*phi[i][qp]))
-                                                   *(dphi[j][qp]+ik*dphase[qp]*phi[j][qp]);
+            *(dphi[j][qp]+ik*dphase[qp]*phi[j][qp]);
           
           // assemble the Hamiltonian: H=1/2 Nabla^2 + V
           H(i,j) += JxW[qp]*(0.5*temp + potval*weight[qp]*phi[i][qp]*phi[j][qp]);
@@ -552,7 +552,7 @@ void SlepcSolverConfiguration::configure_solver()
           ierr = STSetType(st, STSHIFT);
           break;
         case SINVERT:
-    // this method has been renamed in 3.1
+          // this method has been renamed in 3.1
 #if SLEPC_VERSION_LESS_THAN(3,1,0)
           ierr = STSetType(st, STSINV);
 #else

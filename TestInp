@@ -1,14 +1,4 @@
-#    This is a sample input-file for InSpecTOR.
-
-nev = 5        # any integer
-pot = FooBar   # a string used later for the name of output-files
-spect =sm      #  sm, lm, (magnitude) sr, lr, (real) si, li, (imaginary) 
-Energy = 0.3188 # set the energy-offset ( target energy: Energy= ... and spect = sm, sr or similar)
-
-mesh_geom=fibonacci  # sphere, box, own, fibonacci, spiral, archimedes
+nev = 1        # any integer
+Energy = -0.5  # set the energy-offset ( target energy: Energy= ... and spect = sm, sr or similar)
 order=1
-radius= 7.
-maxVol= 10.
 maxiter=1400
-
-refine = false  # flag: mesh refinement allowed or not?
